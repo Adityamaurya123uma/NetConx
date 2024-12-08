@@ -3,9 +3,6 @@ import struct
 import textwrap
 import time
 
-buffer = []
-MAX_BUFFER_SIZE = 100
-
 def main():
     conn = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
     buffer = []
@@ -34,6 +31,8 @@ def process_buffer(buffer):
         print('Destination: {}, Source: {}, Protocol: {}'.format(dest_mac, src_mac, eth_proto))
         if eth_proto == 8:  # IPv4
             process_ipv4_packet(data)
+        if eth_proto == 0x86DD: # IPv6
+            process_ipv6_packet(data)
 
 
 #Unpack ethernet frame
@@ -45,6 +44,10 @@ def ethernet_frame(data):
 def get_mac_addr(bytes_addr):
     bytes_str = map('{:02x}'.format, bytes_addr)
     return ':'.join(bytes_str).upper()
+
+###########################################################
+# IPv4
+###########################################################
 
 # Unpack IPv4 packet
 def ipv4_packet(data):
@@ -130,5 +133,44 @@ def format_multi_line(prefix, string, size=80):
     if isinstance(string, bytes):  # Check if the input is bytes
         string = ''.join(r'\x{:02x}'.format(byte) for byte in string)  # Convert bytes to a string
     return '\n'.join([prefix + line for line in textwrap.wrap(string, size)])
+
+###########################################################
+# IPv6
+###########################################################
+
+# Unpack IPv6 packet
+def ipv6_packet(data):
+    version_traffic_flow = struct.unpack('! I', data[:4])[0]
+    version = (version_traffic_flow >> 28) & 0xF
+    payload_length, next_header, hop_limit = struct.unpack('! H B B', data[4:8])
+    src_addr = ipv6(data[8:24])
+    dest_addr = ipv6(data[24:40])
+    return version, payload_length, next_header, hop_limit, src_addr, dest_addr, data[40:]
+
+# Return formatted IPv6 addresses
+def ipv6(addr):
+    return ':'.join(f"{addr[i]:02x}{addr[i+1]:02x}" for i in range(0, len(addr), 2))
+
+def process_ipv6_packet(data):
+    try:
+        version, payload_length, next_header, hop_limit, src_addr, dest_addr, payload = ipv6_packet(data)
+        print(f"\tIPv6 Packet:")
+        print('\t\tVersion: {}, Payload Length: {}, Next Header: {}, Hop Limit: {}'.format(
+            version, payload_length, next_header, hop_limit
+        ))
+        print('\t\tSource: {}, Destination: {}'.format(src_addr, dest_addr))
+
+        # Route to upper-layer protocol handlers based on Next Header
+        if next_header == 58:  # ICMPv6
+            process_icmp_packet(payload)
+        elif next_header == 6:  # TCP
+            process_tcp_segment(payload)
+        elif next_header == 17:  # UDP
+            process_udp_segment(payload)
+        else:
+            print('\t\tOther Protocol Data:')
+            print(format_multi_line('\t\t\t', payload))
+    except ValueError as e:
+        print('\tError processing IPv6 packet:', e)
 
 main()
