@@ -1,57 +1,39 @@
 import socket
 import struct
 import textwrap
+import time
 
 buffer = []
 MAX_BUFFER_SIZE = 100
 
 def main():
     conn = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+    buffer = []
+    MAX_BUFFER_SIZE = 100
+    BUFFER_TIMEOUT = 2
+    last_flush_time = time.time()
 
     while True:
         try:
             raw_data, addr = conn.recvfrom(65535)
-            dest_mac, src_mac, eth_proto, data = ethernet_frame(raw_data)
-            print('\nEthernet Frame:')
-            print('Destination: {}, Source: {}, Protocol: {}'.format(dest_mac, src_mac, eth_proto))
-            print(f"Captured frame length: {len(data)}, Protocol: {eth_proto}")
+            buffer.append(raw_data)
 
-            # Process only IPv4 packets
-            if eth_proto == 8:
-                if len(data) < 20:
-                    print('\tInsufficient data for IPv4 packet. Skipping...')
-                    continue  # Skip to the next packet
-
-                version, header_length, ttl, proto, src, target, data = ipv4_packet(data)
-                print('\tIPv4 Packet:')
-                print('\t\tVersion: {}, Header Length: {}, TTL: {}'.format(version, header_length, ttl))
-                print('\t\tProtocol: {}, Source: {}, Target: {}'.format(proto, src, target))
-
-                # ICMP, TCP, UDP, or other protocols
-                if proto == 1:  # ICMP
-                    icmp_type, code, checksum, data = icmp_packet(data)
-                    print('\tICMP Packet:')
-                    print('\t\tType: {}, Code: {}, Checksum: {}'.format(icmp_type, code, checksum))
-                    print(format_multi_line('\t\t\t', data))
-
-                elif proto == 6:  # TCP
-                    tcp_segment_data = tcp_segment(data)
-                    print('\tTCP Segment:')
-                    print('\t\tSource Port: {}, Destination Port: {}'.format(tcp_segment_data[0], tcp_segment_data[1]))
-                    print(format_multi_line('\t\t\t', tcp_segment_data[-1]))
-
-                elif proto == 17:  # UDP
-                    src_port, dest_port, length, data = udp_segment(data)
-                    print('\tUDP Segment:')
-                    print('\t\tSource Port: {}, Destination Port: {}, Length: {}'.format(src_port, dest_port, length))
-
-                else:
-                    print('\tOther Data:')
-                    print(format_multi_line('\t\t', data))
-            else:
-                print('\tNon-IPv4 frame detected. Skipping...')
+            current_time = time.time()
+            if len(buffer) >= MAX_BUFFER_SIZE or (current_time - last_flush_time) > BUFFER_TIMEOUT:
+                process_buffer(buffer)
+                buffer.clear()
+                last_flush_time = current_time
         except Exception as e:
-            print('Error:', e)
+            print("Error:", e)
+
+
+def process_buffer(buffer):
+    for raw_data in buffer:
+        dest_mac, src_mac, eth_proto, data = ethernet_frame(raw_data)
+        print('\nEthernet Frame:')
+        print('Destination: {}, Source: {}, Protocol: {}'.format(dest_mac, src_mac, eth_proto))
+        if eth_proto == 8:  # IPv4
+            process_ipv4_packet(data)
 
 
 #Unpack ethernet frame
@@ -77,6 +59,48 @@ def ipv4_packet(data):
 # Returns properly formatted IPv4 address
 def ipv4(addr):
     return '.'.join(map(str, addr))
+
+def process_ipv4_packet(data):
+    try:
+        version, header_length, ttl, proto, src, target, data = ipv4_packet(data)
+        print('\tIPv4 Packet:')
+        print('\t\tVersion: {}, Header Length: {}, TTL: {}'.format(version, header_length, ttl))
+        print('\t\tProtocol: {}, Source: {}, Target: {}'.format(proto, src, target))
+
+        if proto == 1:  # ICMP
+            process_icmp_packet(data)
+        elif proto == 6:  # TCP
+            process_tcp_segment(data)
+        elif proto == 17:  # UDP
+            process_udp_segment(data)
+        else:
+            print('\t\tOther Protocol Data:')
+            print(format_multi_line('\t\t\t', data))
+    except ValueError as e:
+        print('\tError processing IPv4 packet:', e)
+
+def process_icmp_packet(data):
+    icmp_type, code, checksum, data = icmp_packet(data)
+    print('\tICMP Packet:')
+    print('\t\tType: {}, Code: {}, Checksum: {}'.format(icmp_type, code, checksum))
+    print(format_multi_line('\t\t\t', data))
+
+def process_udp_segment(data):
+    src_port, dest_port, length, data = udp_segment(data)
+    print('\tUDP Segment:')
+    print('\t\tSource Port: {}, Destination Port: {}, Length: {}'.format(src_port, dest_port, length))
+    print(format_multi_line('\t\t\t', data))
+
+def process_tcp_segment(data):
+    tcp_segment_data = tcp_segment(data)
+    print('\tTCP Segment:')
+    print('\t\tSource Port: {}, Destination Port: {}'.format(tcp_segment_data[0], tcp_segment_data[1]))
+    print('\t\tSequence: {}, Acknowledgment: {}'.format(tcp_segment_data[2], tcp_segment_data[3]))
+    print('\t\tFlags: URG={}, ACK={}, PSH={}, RST={}, SYN={}, FIN={}'.format(
+        tcp_segment_data[5], tcp_segment_data[6], tcp_segment_data[7], tcp_segment_data[8], tcp_segment_data[9], tcp_segment_data[10]
+    ))
+    print(format_multi_line('\t\t\t', tcp_segment_data[-1]))
+
 
 # Unpack ICMP packet
 def icmp_packet(data):
