@@ -90,19 +90,25 @@ def process_icmp_packet(data):
 
 def process_udp_segment(data):
     src_port, dest_port, length, data = udp_segment(data)
-    print('\tUDP Segment:')
-    print('\t\tSource Port: {}, Destination Port: {}, Length: {}'.format(src_port, dest_port, length))
-    print(format_multi_line('\t\t\t', data))
+    print(f'\tUDP Segment: Source Port: {src_port}, Destination Port: {dest_port}')
+    if src_port == 53 or dest_port == 53:
+        print("\tDNS Detected:")
+        process_dns(data)
+    else:
+        print(format_multi_line('\t\t', data))
+
 
 def process_tcp_segment(data):
-    tcp_segment_data = tcp_segment(data)
-    print('\tTCP Segment:')
-    print('\t\tSource Port: {}, Destination Port: {}'.format(tcp_segment_data[0], tcp_segment_data[1]))
-    print('\t\tSequence: {}, Acknowledgment: {}'.format(tcp_segment_data[2], tcp_segment_data[3]))
-    print('\t\tFlags: URG={}, ACK={}, PSH={}, RST={}, SYN={}, FIN={}'.format(
-        tcp_segment_data[5], tcp_segment_data[6], tcp_segment_data[7], tcp_segment_data[8], tcp_segment_data[9], tcp_segment_data[10]
-    ))
-    print(format_multi_line('\t\t\t', tcp_segment_data[-1]))
+    src_port, dest_port, sequence, acknowledgement, offset_reserved_flags, data = tcp_segment(data)
+    print(f'\tTCP Segment: Source Port: {src_port}, Destination Port: {dest_port}')
+    if src_port == 80 or dest_port == 80:
+        print("\tHTTP Detected:")
+        process_http(data)
+    elif src_port == 443 or dest_port == 443:
+        print("\tTLS/HTTPS traffic detected. (Decryption requires additional setup)")
+    else:
+        print(format_multi_line('\t\t', data))
+
 
 
 # Unpack ICMP packet
@@ -172,5 +178,24 @@ def process_ipv6_packet(data):
             print(format_multi_line('\t\t\t', payload))
     except ValueError as e:
         print('\tError processing IPv6 packet:', e)
+
+def process_http(data):
+    try:
+        http_data = data.decode('utf-8', errors='ignore')
+        headers = http_data.split('\r\n')
+        for header in headers:
+            print(f"\tHTTP: {header}")
+    except Exception as e:
+        print(f"\tError parsing HTTP data: {e}")
+
+
+def process_dns(data):
+    try:
+        transaction_id, flags, questions, answer_rrs, authority_rrs, additional_rrs = struct.unpack('! H H H H H H', data[:12])
+        print(f"\tDNS: Transaction ID: {transaction_id}, Questions: {questions}")
+        # Implement deeper decoding for queries/answers if needed.
+    except Exception as e:
+        print(f"\tError parsing DNS data: {e}")
+
 
 main()
